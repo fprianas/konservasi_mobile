@@ -55,7 +55,7 @@ class _FormFsDialogState extends State<FormFsDialog> {
 
   late TextEditingController _catatanCtrl;
 
-  List<String> _evaluatorList = [];
+  List<String> _evaluatorList = List<String>.from(EvaluasiPerusahaanService.kDefaultPetugas);
   String? _selectedEvaluator;
   bool _isManualEvaluator = false;
 

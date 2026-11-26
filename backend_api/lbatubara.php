@@ -17,6 +17,79 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
 
 require_once 'koneksi.php';
 
+// AJAX handler untuk manajemen status aktif/non-aktif perusahaan batubara
+if (isset($_POST['action']) && in_array($_POST['action'], ['manage_company_status', 'toggle_company_status'], true)) {
+    while (ob_get_level()) { ob_end_clean(); }
+    header('Content-Type: application/json; charset=utf-8');
+    $act = $_POST['action'];
+
+    if ($act === 'manage_company_status') {
+        $filter_status = $_POST['filter_status'] ?? 'nonaktif';
+        $q = escapeString(trim($_POST['q'] ?? ''));
+        $provinsi = escapeString(trim($_POST['provinsi'] ?? ''));
+
+        $where = ["pb.sk_iup IS NOT NULL", "pb.sk_iup != ''"];
+        if ($filter_status === 'nonaktif') {
+            $where[] = "COALESCE(pb.is_active, 1) = 0";
+        } elseif ($filter_status === 'aktif') {
+            $where[] = "COALESCE(pb.is_active, 1) = 1";
+        }
+        if (!empty($provinsi) && $provinsi !== 'semua') {
+            $where[] = "p.nama_provinsi = '$provinsi'";
+        }
+        if (!empty($q)) {
+            $where[] = "(pb.nama_perusahaan LIKE '%$q%' OR pb.sk_iup LIKE '%$q%' OR COALESCE(p.nama_provinsi, '') LIKE '%$q%')";
+        }
+        $where_sql = implode(' AND ', $where);
+        $sql = "SELECT pb.id, pb.nama_perusahaan, pb.sk_iup, COALESCE(p.nama_provinsi, '-') as nama_provinsi,
+                       COALESCE(pb.jenis_izin, '-') as jenis_izin, COALESCE(pb.is_active, 1) as is_active
+                FROM perusahaan_batubara pb
+                LEFT JOIN provinsi p ON pb.id_provinsi = p.id_provinsi
+                WHERE $where_sql
+                ORDER BY pb.is_active ASC, pb.nama_perusahaan ASC
+                LIMIT 500";
+        $res = executeQuery($sql);
+        $rows = [];
+        if ($res) {
+            while ($r = $res->fetch_assoc()) {
+                $rows[] = [
+                    'id' => (int)$r['id'],
+                    'nama_perusahaan' => $r['nama_perusahaan'],
+                    'sk_iup' => $r['sk_iup'],
+                    'nama_provinsi' => $r['nama_provinsi'],
+                    'jenis_izin' => $r['jenis_izin'],
+                    'is_active' => ((int)$r['is_active']) === 1
+                ];
+            }
+        }
+        echo json_encode(['success' => true, 'data' => $rows]);
+        exit();
+    }
+
+    if ($act === 'toggle_company_status') {
+        $pin = trim($_POST['pin'] ?? '');
+        if ($pin !== '3636') {
+            echo json_encode(['success' => false, 'message' => 'PIN keamanan tidak valid.']);
+            exit();
+        }
+        $id = intval($_POST['id'] ?? 0);
+        $is_active = intval($_POST['is_active'] ?? 1) === 1 ? 1 : 0;
+        if ($id <= 0) {
+            echo json_encode(['success' => false, 'message' => 'ID perusahaan tidak valid.']);
+            exit();
+        }
+        $ok = executeQuery("UPDATE perusahaan_batubara SET is_active = $is_active WHERE id = $id");
+        echo json_encode([
+            'success' => (bool)$ok,
+            'is_active' => $is_active === 1,
+            'message' => $ok
+                ? ($is_active === 1 ? 'Perusahaan berhasil diaktifkan kembali.' : 'Perusahaan berhasil dinonaktifkan.')
+                : 'Gagal memperbarui status perusahaan.'
+        ]);
+        exit();
+    }
+}
+
 // Fungsi untuk mendapatkan daftar provinsi
 function getProvinsiList()
 {
@@ -130,6 +203,7 @@ function getAnalisisPerusahaan($provinsi = '', $tahun = '', $triwulan = '', $jen
     $where_conditions_laporan = array();
     $where_conditions_laporan[] = "nama_provinsi IS NOT NULL";
     $where_conditions_laporan[] = "nama_perusahaan IS NOT NULL";
+    $where_conditions_laporan[] = "sk_iup NOT IN (SELECT sk_iup FROM perusahaan_batubara WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')";
 
     // Filter provinsi
     if (!empty($provinsi) && $provinsi != 'semua') {
@@ -170,7 +244,7 @@ function getAnalisisPerusahaan($provinsi = '', $tahun = '', $triwulan = '', $jen
     $where_clause_laporan = implode(' AND ', $where_conditions_laporan);
 
     // Buat kondisi WHERE untuk perusahaan
-    $where_conditions_perusahaan = array();
+    $where_conditions_perusahaan = array("COALESCE(pb.is_active, 1) = 1");
     if (!empty($provinsi) && $provinsi != 'semua') {
         $provinsi = escapeString($provinsi);
         $where_conditions_perusahaan[] = "pb.id_provinsi IN (SELECT id_provinsi FROM provinsi WHERE nama_provinsi = '$provinsi')";
@@ -226,9 +300,10 @@ function getTotalStatistikPerusahaan($provinsi = '', $tahun = '', $triwulan = ''
                       FROM perusahaan_batubara pb 
                       LEFT JOIN provinsi prov ON pb.id_provinsi = prov.id_provinsi 
                       WHERE pb.sk_iup IS NOT NULL AND pb.sk_iup != '' 
+                      AND COALESCE(pb.is_active, 1) = 1
                       AND prov.nama_provinsi = '$provinsi'";
     } else {
-        $sql_total = "SELECT COUNT(DISTINCT sk_iup) as total FROM perusahaan_batubara WHERE sk_iup IS NOT NULL AND sk_iup != ''";
+        $sql_total = "SELECT COUNT(DISTINCT sk_iup) as total FROM perusahaan_batubara WHERE sk_iup IS NOT NULL AND sk_iup != '' AND COALESCE(is_active, 1) = 1";
     }
 
     $result_total = executeQuery($sql_total);
@@ -238,7 +313,7 @@ function getTotalStatistikPerusahaan($provinsi = '', $tahun = '', $triwulan = ''
     }
 
     // Query 2: Perusahaan yang sudah melaporkan dari vlaporan_batubara2 dengan semua filter
-    $where_conditions = array();
+    $where_conditions = array("sk_iup NOT IN (SELECT sk_iup FROM perusahaan_batubara WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')");
     if (!empty($tahun) && $tahun != 'semua') {
         $tahun = escapeString($tahun);
         $where_conditions[] = "tahun_1_7 = '$tahun'";
@@ -301,6 +376,7 @@ function getTotalStatistikPerusahaan($provinsi = '', $tahun = '', $triwulan = ''
                         LEFT JOIN provinsi prov ON pb.id_provinsi = prov.id_provinsi
                         WHERE pb.sk_iup IS NOT NULL 
                         AND pb.sk_iup != ''
+                        AND COALESCE(pb.is_active, 1) = 1
                         $provinsi_filter
                         AND pb.sk_iup NOT IN (
                             SELECT sk_iup 
@@ -326,11 +402,30 @@ function getTotalStatistikPerusahaan($provinsi = '', $tahun = '', $triwulan = ''
         $total_dokumen = $row_dokumen['total_dokumen'];
     }
 
+    // Hitung perusahaan non-aktif
+    if (!empty($provinsi) && $provinsi != 'semua') {
+        $prov_esc = escapeString($provinsi);
+        $sql_nonaktif = "SELECT COUNT(DISTINCT pb.sk_iup) as total_nonaktif
+                         FROM perusahaan_batubara pb
+                         LEFT JOIN provinsi prov ON pb.id_provinsi = prov.id_provinsi
+                         WHERE pb.sk_iup IS NOT NULL AND pb.sk_iup != ''
+                         AND COALESCE(pb.is_active, 1) = 0
+                         AND prov.nama_provinsi = '$prov_esc'";
+    } else {
+        $sql_nonaktif = "SELECT COUNT(DISTINCT sk_iup) as total_nonaktif FROM perusahaan_batubara WHERE sk_iup IS NOT NULL AND sk_iup != '' AND COALESCE(is_active, 1) = 0";
+    }
+    $res_nonaktif = executeQuery($sql_nonaktif);
+    $total_nonaktif = 0;
+    if ($res_nonaktif && $row_na = $res_nonaktif->fetch_assoc()) {
+        $total_nonaktif = intval($row_na['total_nonaktif']);
+    }
+
     // Return sebagai object, persis lmineral.php (sebelumnya array/mysqli_result)
     return (object) [
         'total_perusahaan' => $total_perusahaan,
         'perusahaan_sudah_lapor' => $sudah_melaporkan,
         'belum_lapor' => $belum_melaporkan,
+        'non_aktif' => $total_nonaktif,
         'sudah_lapor' => $total_dokumen // total laporan masuk
     ];
 }
@@ -384,7 +479,8 @@ function getDaftarPerusahaan($status = 'all', $provinsi = '', $tahun = '', $triw
 
     // Query berbeda berdasarkan status
     if ($status == 'belum_lapor') {
-        // Untuk yang belum lapor, ambil perusahaan yang tidak ada di laporan sesuai filter
+        // Untuk yang belum lapor, ambil perusahaan aktif yang tidak ada di laporan sesuai filter
+        $where_conditions[] = "COALESCE(pb.is_active, 1) = 1";
         $where_conditions[] = "pb.sk_iup NOT IN (
             SELECT DISTINCT sk_iup 
             FROM vlaporan_batubara2 
@@ -1699,6 +1795,7 @@ if (empty($jenis_perizinan_options)) {
 
                                 // Hitung persentase berdasarkan perusahaan unik yang sudah lapor
                                 $total_perush = intval($total_statistik->total_perusahaan ?? 0);
+                                $non_aktif_count = intval($total_statistik->non_aktif ?? 0);
                                 $persentase_total = $total_perush > 0 ?
                                     round(($perusahaan_sudah_lapor * 100) / $total_perush, 2) : 0;
                                 ?>
@@ -1712,20 +1809,20 @@ if (empty($jenis_perizinan_options)) {
                                 </div>
 
                                 <!-- Summary Cards -->
-                                <div class="row mb-4">
-                                    <div class="col-md-3">
-                                        <div class="card border-primary" style="cursor: pointer;"
+                                <div class="row row-cols-1 row-cols-md-5 g-3 mb-4">
+                                    <div class="col">
+                                        <div class="card border-primary h-100" style="cursor: pointer;"
                                             onclick="showModal('total', '<?php echo $provinsi; ?>', '<?php echo $tahun; ?>', '<?php echo $triwulan; ?>', '<?php echo $jenis_perizinan; ?>')">
                                             <div class="card-body text-center">
                                                 <h3 class="text-primary"><?php echo formatNumber($total_perush); ?></h3>
-                                                <p class="text-muted mb-0">Total Perusahaan Terdaftar</p>
+                                                <p class="text-muted mb-0">Perusahaan Wajib Lapor (Aktif)</p>
                                                 <small class="text-muted"><i class="bi bi-hand-index"></i> Klik untuk
                                                     detail</small>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <div class="card border-success" style="cursor: pointer;"
+                                    <div class="col">
+                                        <div class="card border-success h-100" style="cursor: pointer;"
                                             onclick="showModal('sudah_lapor', '<?php echo $provinsi; ?>', '<?php echo $tahun; ?>', '<?php echo $triwulan; ?>', '<?php echo $jenis_perizinan; ?>')">
                                             <div class="card-body text-center">
                                                 <h3 class="text-success"><?php echo formatNumber($perusahaan_sudah_lapor); ?>
@@ -1742,8 +1839,8 @@ if (empty($jenis_perizinan_options)) {
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <div class="card border-warning" style="cursor: pointer;"
+                                    <div class="col">
+                                        <div class="card border-warning h-100" style="cursor: pointer;"
                                             onclick="showModal('belum_lapor', '<?php echo $provinsi; ?>', '<?php echo $tahun; ?>', '<?php echo $triwulan; ?>', '<?php echo $jenis_perizinan; ?>')">
                                             <div class="card-body text-center">
                                                 <h3 class="text-warning"><?php echo formatNumber($belum_lapor_sederhana); ?>
@@ -1755,11 +1852,29 @@ if (empty($jenis_perizinan_options)) {
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <div class="card border-info">
+                                    <div class="col">
+                                        <div class="card border-danger h-100" style="cursor: pointer;"
+                                            onclick="openStatusModal('nonaktif')">
+                                            <div class="card-body text-center">
+                                                <h3 class="text-danger"><?php echo formatNumber($non_aktif_count); ?></h3>
+                                                <p class="text-muted mb-0">Perusahaan Non-Aktif</p>
+                                                <small class="text-danger fw-semibold d-block" style="font-size: 0.75rem;">
+                                                    (Dikecualikan dari %)
+                                                </small>
+                                                <small class="text-muted" style="font-size: 0.75rem;">
+                                                    <i class="bi bi-sliders"></i> Kelola Aktif/Non-Aktif
+                                                </small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col">
+                                        <div class="card border-info h-100">
                                             <div class="card-body text-center">
                                                 <h3 class="text-info"><?php echo $persentase_total; ?>%</h3>
                                                 <p class="text-muted mb-0">Tingkat Kepatuhan</p>
+                                                <small class="text-muted" style="font-size: 0.75rem;">
+                                                    Basis: <?php echo formatNumber($total_perush); ?> Aktif
+                                                </small>
                                             </div>
                                         </div>
                                     </div>
@@ -3189,6 +3304,140 @@ if (empty($jenis_perizinan_options)) {
             };
             testImg.src = 'esdm2.png';
         }, 1000);
+    </script>
+
+    <!-- Modal Kelola Status Aktif / Non-Aktif Perusahaan -->
+    <div class="modal fade" id="modalStatusPerusahaan" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="bi bi-sliders me-2"></i>Kelola Status Perusahaan (Aktif / Non-Aktif)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning py-2 small mb-3">
+                        <i class="bi bi-info-circle-fill me-1"></i>
+                        Perusahaan yang berstatus <strong>Non-Aktif</strong> dikecualikan dari pembagi Total Perusahaan Wajib Lapor sehingga <strong>Persentase Tingkat Kepatuhan</strong> otomatis disesuaikan.
+                    </div>
+                    <div class="row g-2 mb-3 align-items-center">
+                        <div class="col-md-5">
+                            <input type="text" id="statusSearchInput" class="form-control form-control-sm" placeholder="Cari nama perusahaan / SK IUP / provinsi...">
+                        </div>
+                        <div class="col-md-7 text-md-end">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-danger active status-filter-btn" data-filter="nonaktif">Non-Aktif</button>
+                                <button type="button" class="btn btn-outline-success status-filter-btn" data-filter="aktif">Aktif</button>
+                                <button type="button" class="btn btn-outline-secondary status-filter-btn" data-filter="semua">Semua</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th width="45">No</th>
+                                    <th>Nama Perusahaan</th>
+                                    <th>SK IUP</th>
+                                    <th>Provinsi</th>
+                                    <th width="110">Status</th>
+                                    <th width="140" class="text-center">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="statusCompanyTableBody">
+                                <tr><td colspan="6" class="text-center py-4 text-muted">Memuat data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStatusFilter = 'nonaktif';
+        let statusChangedInModal = false;
+
+        function openStatusModal(filter) {
+            currentStatusFilter = filter || 'nonaktif';
+            statusChangedInModal = false;
+            $('.status-filter-btn').removeClass('active');
+            $('.status-filter-btn[data-filter="' + currentStatusFilter + '"]').addClass('active');
+            $('#statusSearchInput').val('');
+            $('#modalStatusPerusahaan').modal('show');
+            loadStatusCompanies();
+        }
+
+        function loadStatusCompanies() {
+            const q = $('#statusSearchInput').val() || '';
+            const prov = $('#provinsi').val() || '<?php echo htmlspecialchars($provinsi ?? 'semua'); ?>';
+            $('#statusCompanyTableBody').html('<tr><td colspan="6" class="text-center py-4 text-muted">Memuat data perusahaan...</td></tr>');
+            $.post('lbatubara.php', {
+                action: 'manage_company_status',
+                filter_status: currentStatusFilter,
+                q: q,
+                provinsi: prov
+            }, function(res) {
+                if (!res || !res.success) {
+                    $('#statusCompanyTableBody').html('<tr><td colspan="6" class="text-center text-danger py-4">Gagal memuat data.</td></tr>');
+                    return;
+                }
+                if (!res.data || res.data.length === 0) {
+                    $('#statusCompanyTableBody').html('<tr><td colspan="6" class="text-center text-muted py-4">Tidak ada perusahaan pada filter ini.</td></tr>');
+                    return;
+                }
+                let html = '';
+                res.data.forEach(function(item, idx) {
+                    const badge = item.is_active
+                        ? '<span class="badge bg-success">Aktif</span>'
+                        : '<span class="badge bg-danger">Non-Aktif</span>';
+                    const btn = item.is_active
+                        ? '<button class="btn btn-outline-danger btn-sm" onclick="toggleCompanyStatusWeb(' + item.id + ', 0)"><i class="bi bi-slash-circle"></i> Non-Aktifkan</button>'
+                        : '<button class="btn btn-outline-success btn-sm" onclick="toggleCompanyStatusWeb(' + item.id + ', 1)"><i class="bi bi-check-circle"></i> Aktifkan</button>';
+                    html += '<tr>' +
+                        '<td>' + (idx + 1) + '</td>' +
+                        '<td class="fw-semibold">' + $('<div>').text(item.nama_perusahaan).html() + '</td>' +
+                        '<td><code>' + $('<div>').text(item.sk_iup).html() + '</code></td>' +
+                        '<td>' + $('<div>').text(item.nama_provinsi).html() + '</td>' +
+                        '<td>' + badge + '</td>' +
+                        '<td class="text-center">' + btn + '</td>' +
+                        '</tr>';
+                });
+                $('#statusCompanyTableBody').html(html);
+            }, 'json');
+        }
+
+        function toggleCompanyStatusWeb(id, targetActive) {
+            const label = targetActive === 1 ? 'mengaktifkan' : 'menonaktifkan';
+            const pin = prompt('Masukkan PIN keamanan untuk ' + label + ' perusahaan ini:');
+            if (pin === null) return;
+            $.post('lbatubara.php', {
+                action: 'toggle_company_status',
+                id: id,
+                is_active: targetActive,
+                pin: pin.trim()
+            }, function(res) {
+                if (res && res.success) {
+                    statusChangedInModal = true;
+                    alert(res.message + '\nHalaman akan dimuat ulang untuk memperbarui persentase.');
+                    location.reload();
+                } else {
+                    alert((res && res.message) ? res.message : 'Gagal mengubah status.');
+                }
+            }, 'json');
+        }
+
+        $(document).on('click', '.status-filter-btn', function() {
+            currentStatusFilter = $(this).data('filter');
+            $('.status-filter-btn').removeClass('active');
+            $(this).addClass('active');
+            loadStatusCompanies();
+        });
+
+        let statusSearchTimer = null;
+        $(document).on('input', '#statusSearchInput', function() {
+            clearTimeout(statusSearchTimer);
+            statusSearchTimer = setTimeout(loadStatusCompanies, 300);
+        });
     </script>
 
 </body>

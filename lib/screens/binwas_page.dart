@@ -35,17 +35,17 @@ class _BinwasPageState extends State<BinwasPage> with SingleTickerProviderStateM
 
   // State Tab 2: Form Inspeksi
   static const List<String> kDaftarPetugas = [
-    'Aryanti',
-    'Alpon',
-    'Dody',
-    'Rozy',
-    'A.Suryanti',
-    'Nyke',
-    'Marthin',
-    'Rangga',
+    'Doddy Hendrasukmana',
+    'Muhammad Zakie Fajri',
+    'Renny Rinjani',
     'Hastomo',
-    'Zakie',
-    'Reny',
+    'Aryanti Arthaningrum',
+    'Marthin Palyngan',
+    'Nyke Afriananda',
+    'A. Suryanti',
+    'Alpon Elysha Limbong',
+    'Rozi Kurnia Rusandi',
+    'Rangga Perdana Novanto',
     'Putu',
     'Ilham',
     'Sari',
@@ -56,7 +56,7 @@ class _BinwasPageState extends State<BinwasPage> with SingleTickerProviderStateM
   final Map<int, BinwasInspeksiItemInput> _formInputs = {}; // key: id_item_temuan
   Map<String, dynamic>? _selectedCompany;
   final TextEditingController _searchCompanyController = TextEditingController();
-  String? _selectedPetugas = 'Aryanti';
+  String? _selectedPetugas = 'Aryanti Arthaningrum';
   final TextEditingController _catatanUmumController = TextEditingController();
   DateTime _tanggalInspeksi = DateTime.now();
   String _formTriwulan = 'Triwulan 2';
@@ -841,7 +841,7 @@ class _BinwasPageState extends State<BinwasPage> with SingleTickerProviderStateM
         // Reset Form & pindah ke riwayat
         _selectedCompany = null;
         _catatanUmumController.clear();
-        _selectedPetugas = 'Aryanti';
+        _selectedPetugas = 'Aryanti Arthaningrum';
         _loadMasterTemuan();
         _tabController.animateTo(2);
         _loadDashboard();

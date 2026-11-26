@@ -1,16 +1,19 @@
 import 'dart:async';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/company_search_item.dart';
 import '../models/evaluasi_perusahaan_model.dart';
 import '../models/report_item.dart';
 import '../services/api_service.dart';
+import '../services/company_status_service.dart';
 import '../services/evaluasi_exporter_service.dart';
 import '../services/evaluasi_perusahaan_service.dart';
 import '../widgets/delete_evaluasi_dialog.dart';
 import '../widgets/detail_modal.dart';
 import '../widgets/evaluasi_perusahaan_dialog.dart';
 import '../widgets/security_pin_dialog.dart';
+import 'company_status_page.dart';
 import 'info_page.dart';
 import 'rekap_evaluasi_perusahaan_page.dart';
 
@@ -28,7 +31,18 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
   // Filter states
   ReportType? _selectedTypeFilter; // null means 'Semua Sektor'
   String _selectedTahun = 'semua'; // default semua tahun agar pencarian komprehensif
+  String _selectedActiveFilter = 'semua'; // 'semua' | 'aktif' | 'nonaktif'
   List<String> _availableYears = ['2026', '2025', '2024', '2023', '2022', '2021', '2020'];
+
+  List<CompanySearchItem> get _filteredResults {
+    if (_selectedActiveFilter == 'aktif') {
+      return _searchResults.where((c) => c.isActive).toList();
+    }
+    if (_selectedActiveFilter == 'nonaktif') {
+      return _searchResults.where((c) => !c.isActive).toList();
+    }
+    return _searchResults;
+  }
 
   // Search results state
   List<CompanySearchItem> _searchResults = [];
@@ -204,6 +218,22 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Kelola Status Aktif / Non-Aktif Perusahaan',
+            icon: const Icon(Icons.toggle_on_outlined, color: Color(0xFF0F766E)),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CompanyStatusPage(
+                    initialType: _selectedTypeFilter ?? ReportType.batubara,
+                  ),
+                ),
+              );
+              if (_searchController.text.isNotEmpty || _hasSearched) {
+                _performSearch(_searchController.text);
+              }
+            },
+          ),
+          IconButton(
             tooltip: 'Rekap Evaluasi Perusahaan',
             icon: const Icon(Icons.fact_check_outlined, color: Color(0xFFB45309)),
             onPressed: () {
@@ -303,6 +333,24 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
 
                 const SizedBox(height: 8),
 
+                // Status Aktif / Non-Aktif Filter Chips
+                Row(
+                  children: [
+                    const Text(
+                      'Status:',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF71717A)),
+                    ),
+                    const SizedBox(width: 8),
+                    _buildActiveFilterChip('Semua', 'semua', const Color(0xFF18181B), const Color(0xFFFBBF24)),
+                    const SizedBox(width: 6),
+                    _buildActiveFilterChip('Aktif', 'aktif', const Color(0xFF16A34A), Colors.white),
+                    const SizedBox(width: 6),
+                    _buildActiveFilterChip('Non-Aktif', 'nonaktif', const Color(0xFFDC2626), Colors.white),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
                 // Year Filter Chips Row
                 Row(
                   children: [
@@ -373,6 +421,35 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
             fontSize: 10.5,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             color: isSelected ? const Color(0xFFFBBF24) : const Color(0xFF52525B),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveFilterChip(String label, String value, Color activeBg, Color activeText) {
+    final isSelected = _selectedActiveFilter == value;
+    return GestureDetector(
+      onTap: () {
+        if (_selectedActiveFilter == value) return;
+        setState(() => _selectedActiveFilter = value);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? activeBg : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? activeBg : const Color(0xFFE4E4E7),
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? activeText : const Color(0xFF52525B),
           ),
         ),
       ),
@@ -517,8 +594,30 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
       );
     }
 
-    final prodCount = _searchResults.where((c) => c.isProduksi).length;
-    final belumProdCount = _searchResults.length - prodCount;
+    final filteredList = _filteredResults;
+    if (filteredList.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.search_off_rounded, size: 46, color: Color(0xFFA1A1AA)),
+              const SizedBox(height: 10),
+              Text(
+                _searchResults.isNotEmpty
+                    ? 'Tidak ada perusahaan dengan status "${_selectedActiveFilter == 'aktif' ? 'Aktif' : 'Non-Aktif'}"'
+                    : 'Perusahaan tidak ditemukan',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF18181B)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final prodCount = filteredList.where((c) => c.isProduksi).length;
+    final belumProdCount = filteredList.length - prodCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,7 +628,7 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
           child: Row(
             children: [
               Text(
-                'Ditemukan ${_searchResults.length} Perusahaan',
+                'Ditemukan ${filteredList.length} Perusahaan',
                 style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF18181B)),
               ),
               const Spacer(),
@@ -564,9 +663,9 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
-            itemCount: _searchResults.length,
+            itemCount: filteredList.length,
             itemBuilder: (context, index) {
-              final company = _searchResults[index];
+              final company = filteredList[index];
               return _buildCompanyCard(company);
             },
           ),
@@ -759,6 +858,40 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
                   ),
                   // Badge Evaluasi (Merah: belum di Evaluasi, Kuning: belum memadai, Hijau: memadai)
                   _buildEvaluasiBadge(eval),
+                  // Badge Atribut Aktif / Non-Aktif (dapat diketuk langsung untuk ubah status)
+                  InkWell(
+                    onTap: () => _toggleCardCompanyStatus(company),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: company.isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: company.isActive ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            company.isActive ? Icons.toggle_on : Icons.toggle_off,
+                            size: 12,
+                            color: company.isActive ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            company.isActive ? 'Aktif' : 'Non-Aktif',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              color: company.isActive ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
@@ -884,6 +1017,59 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
     );
   }
 
+  Future<void> _toggleCardCompanyStatus(CompanySearchItem company) async {
+    final targetActive = !company.isActive;
+    final pinOk = await SecurityPinDialog.verify(
+      context,
+      title: targetActive ? 'Aktifkan Perusahaan?' : 'Non-Aktifkan Perusahaan?',
+      subtitle: targetActive
+          ? 'Masukkan PIN untuk mengaktifkan kembali ${company.namaPerusahaan} ke perhitungan persentase laporan.'
+          : 'Masukkan PIN untuk menonaktifkan ${company.namaPerusahaan}. Perusahaan non-aktif tidak dihitung pada persentase kepatuhan.',
+      confirmLabel: targetActive ? 'Aktifkan' : 'Non-Aktifkan',
+      confirmColor: targetActive ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      icon: targetActive ? Icons.check_circle_outline : Icons.block_outlined,
+    );
+    if (pinOk != true || !mounted) return;
+
+    try {
+      final newActive = await CompanyStatusService.toggleStatus(
+        type: company.type,
+        skIup: company.skIup,
+        namaPerusahaan: company.namaPerusahaan,
+        isActive: targetActive,
+      );
+      if (!mounted) return;
+      setState(() {
+        final idx = _searchResults.indexWhere(
+          (c) => c.skIup == company.skIup && c.namaPerusahaan == company.namaPerusahaan && c.type == company.type,
+        );
+        if (idx != -1) {
+          _searchResults[idx] = _searchResults[idx].copyWith(isActive: newActive);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newActive
+                ? '${company.namaPerusahaan} diaktifkan. Persentase laporan diperbarui.'
+                : '${company.namaPerusahaan} dinonaktifkan. Persentase laporan diperbarui.',
+          ),
+          backgroundColor: newActive ? const Color(0xFF16A34A) : const Color(0xFF52525B),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   void _openCompanyHistory(CompanySearchItem company) {
     final key = company.namaPerusahaan.trim().toLowerCase();
     final eval = _evaluasiMap[key];
@@ -902,6 +1088,16 @@ class _CompanySearchPageState extends State<CompanySearchPage> {
               _evaluasiMap.remove(key);
             } else {
               _evaluasiMap[key] = updated;
+            }
+          });
+        },
+        onStatusChanged: (newActive) {
+          setState(() {
+            final idx = _searchResults.indexWhere(
+              (c) => c.skIup == company.skIup && c.namaPerusahaan == company.namaPerusahaan && c.type == company.type,
+            );
+            if (idx != -1) {
+              _searchResults[idx] = _searchResults[idx].copyWith(isActive: newActive);
             }
           });
         },
@@ -935,12 +1131,14 @@ class _CompanyHistoryModal extends StatefulWidget {
   final String? initialTahun;
   final EvaluasiPerusahaanItem? initialEvaluasi;
   final ValueChanged<EvaluasiPerusahaanItem?>? onEvaluasiChanged;
+  final ValueChanged<bool>? onStatusChanged;
 
   const _CompanyHistoryModal({
     required this.company,
     this.initialTahun,
     this.initialEvaluasi,
     this.onEvaluasiChanged,
+    this.onStatusChanged,
   });
 
   @override
@@ -955,12 +1153,15 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
   EvaluasiPerusahaanItem? _evaluasi;
   Map<String, EvaluasiPerusahaanItem> _companyEvaluasiByPeriod = {};
   bool _isExporting = false;
+  late bool _isActive;
+  bool _isTogglingStatus = false;
 
   @override
   void initState() {
     super.initState();
     _reports = widget.company.reports;
     _evaluasi = widget.initialEvaluasi;
+    _isActive = widget.company.isActive;
     if (widget.initialTahun != null && widget.initialTahun != 'semua') {
       _historyYearFilter = widget.initialTahun!;
     } else if (_reports.isNotEmpty) {
@@ -1258,6 +1459,58 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
     return filtered.isNotEmpty ? filtered : _reports;
   }
 
+  Future<void> _toggleCompanyStatus() async {
+    final targetActive = !_isActive;
+    final pinOk = await SecurityPinDialog.verify(
+      context,
+      title: targetActive ? 'Aktifkan Perusahaan?' : 'Non-Aktifkan Perusahaan?',
+      subtitle: targetActive
+          ? 'Masukkan PIN untuk mengaktifkan kembali ${widget.company.namaPerusahaan} ke perhitungan persentase laporan.'
+          : 'Masukkan PIN untuk menonaktifkan ${widget.company.namaPerusahaan}. Perusahaan non-aktif tidak dihitung pada persentase kepatuhan.',
+      confirmLabel: targetActive ? 'Aktifkan' : 'Non-Aktifkan',
+      confirmColor: targetActive ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+      icon: targetActive ? Icons.check_circle_outline : Icons.block_outlined,
+    );
+    if (pinOk != true || !mounted) return;
+
+    setState(() => _isTogglingStatus = true);
+    try {
+      final newActive = await CompanyStatusService.toggleStatus(
+        type: widget.company.type,
+        skIup: widget.company.skIup,
+        namaPerusahaan: widget.company.namaPerusahaan,
+        isActive: targetActive,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isActive = newActive;
+        _isTogglingStatus = false;
+      });
+      widget.onStatusChanged?.call(newActive);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newActive
+                ? '${widget.company.namaPerusahaan} diaktifkan. Persentase laporan diperbarui.'
+                : '${widget.company.namaPerusahaan} dinonaktifkan. Persentase laporan diperbarui.',
+          ),
+          backgroundColor: newActive ? const Color(0xFF16A34A) : const Color(0xFF52525B),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isTogglingStatus = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isBatubara = widget.company.type == ReportType.batubara;
@@ -1307,7 +1560,10 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -1324,13 +1580,51 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 6),
                           Text(
                             '${_reports.length} Histori Laporan',
                             style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
                           ),
-                          const SizedBox(width: 6),
                           _buildModalHeaderEvaluasiBadge(),
+                          InkWell(
+                            onTap: _isTogglingStatus ? null : _toggleCompanyStatus,
+                            borderRadius: BorderRadius.circular(4),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: _isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: _isActive ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_isTogglingStatus)
+                                    const SizedBox(
+                                      width: 10,
+                                      height: 10,
+                                      child: CircularProgressIndicator(strokeWidth: 1.5),
+                                    )
+                                  else
+                                    Icon(
+                                      _isActive ? Icons.toggle_on : Icons.toggle_off,
+                                      size: 13,
+                                      color: _isActive ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+                                    ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    _isActive ? 'Aktif' : 'Non-Aktif',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isActive ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -1973,8 +2267,7 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
     final summableOnly = defs.where((d) => !d.isAverage).toList();
     final averageOnly = defs.where((d) => d.isAverage).toList();
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    return _HorizontalRecapScrollWrapper(
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
@@ -3154,6 +3447,200 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HorizontalRecapScrollWrapper extends StatefulWidget {
+  final Widget child;
+
+  const _HorizontalRecapScrollWrapper({required this.child});
+
+  @override
+  State<_HorizontalRecapScrollWrapper> createState() => _HorizontalRecapScrollWrapperState();
+}
+
+class _HorizontalRecapScrollWrapperState extends State<_HorizontalRecapScrollWrapper> {
+  final ScrollController _controller = ScrollController();
+  bool _hasOverflow = false;
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_updateScrollState);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollState());
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_updateScrollState);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _updateScrollState() {
+    if (!mounted || !_controller.hasClients) return;
+    final pos = _controller.position;
+    final overflow = pos.maxScrollExtent > 2.0;
+    final left = pos.pixels > 2.0;
+    final right = pos.pixels < (pos.maxScrollExtent - 2.0);
+    if (overflow != _hasOverflow || left != _canScrollLeft || right != _canScrollRight) {
+      setState(() {
+        _hasOverflow = overflow;
+        _canScrollLeft = left;
+        _canScrollRight = right;
+      });
+    }
+  }
+
+  void _scrollBy(double delta) {
+    if (!_controller.hasClients) return;
+    final pos = _controller.position;
+    final target = (_controller.offset + delta).clamp(0.0, pos.maxScrollExtent);
+    _controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (notification) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollState());
+            return false;
+          },
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.trackpad,
+                PointerDeviceKind.stylus,
+              },
+            ),
+            child: RawScrollbar(
+              controller: _controller,
+              thumbVisibility: _hasOverflow,
+              trackVisibility: _hasOverflow,
+              thickness: 6,
+              radius: const Radius.circular(6),
+              thumbColor: const Color(0xFFF59E0B).withValues(alpha: 0.8),
+              trackColor: Colors.white.withValues(alpha: 0.08),
+              child: SingleChildScrollView(
+                controller: _controller,
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.only(bottom: _hasOverflow ? 10 : 0),
+                child: widget.child,
+              ),
+            ),
+          ),
+        ),
+        if (_hasOverflow)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFF27272A),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _canScrollRight
+                      ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                      : Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Row(
+                children: [
+                  InkWell(
+                    onTap: _canScrollLeft ? () => _scrollBy(-180) : null,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.chevron_left_rounded,
+                            size: 16,
+                            color: _canScrollLeft ? const Color(0xFFFBBF24) : const Color(0xFF52525B),
+                          ),
+                          Text(
+                            'Kiri',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: _canScrollLeft ? const Color(0xFFFBBF24) : const Color(0xFF52525B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.swipe_rounded,
+                            size: 13,
+                            color: _canScrollRight ? const Color(0xFFFBBF24) : const Color(0xFFA1A1AA),
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              _canScrollRight
+                                  ? 'Geser ke kanan untuk lihat kolom lainnya'
+                                  : 'Sudah di ujung kanan • Geser ke kiri',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: _canScrollRight ? const Color(0xFFFDE68A) : const Color(0xFFA1A1AA),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: _canScrollRight ? () => _scrollBy(180) : null,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Kanan',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: _canScrollRight ? const Color(0xFFFBBF24) : const Color(0xFF52525B),
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: _canScrollRight ? const Color(0xFFFBBF24) : const Color(0xFF52525B),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -15,6 +15,7 @@ class CompanySearchItem {
   final String latestWaktuInput;
   final int totalReports;
   final List<ReportItem> reports;
+  final bool isActive;
 
   CompanySearchItem({
     required this.namaPerusahaan,
@@ -30,7 +31,27 @@ class CompanySearchItem {
     required this.latestWaktuInput,
     required this.totalReports,
     required this.reports,
+    this.isActive = true,
   });
+
+  CompanySearchItem copyWith({bool? isActive}) {
+    return CompanySearchItem(
+      namaPerusahaan: namaPerusahaan,
+      skIup: skIup,
+      provinsi: provinsi,
+      jenisPerizinan: jenisPerizinan,
+      komoditas: komoditas,
+      type: type,
+      latestStatusProduksi: latestStatusProduksi,
+      latestStatusProduksiCode: latestStatusProduksiCode,
+      latestTahun: latestTahun,
+      latestTriwulan: latestTriwulan,
+      latestWaktuInput: latestWaktuInput,
+      totalReports: totalReports,
+      reports: reports,
+      isActive: isActive ?? this.isActive,
+    );
+  }
 
   factory CompanySearchItem.fromJson(Map<String, dynamic> json, ReportType defaultType) {
     final sektorStr = json['sektor']?.toString().toLowerCase() ?? '';
@@ -41,6 +62,11 @@ class CompanySearchItem {
     final statusProd = json['latest_status_produksi']?.toString() ?? 'Belum Produksi';
     final statusProdCode = json['latest_status_produksi_code']?.toString() ??
         (statusProd.toLowerCase().contains('sudah') ? 'P' : 'BP');
+
+    final rawActive = json['is_active'];
+    final bool active = rawActive == null
+        ? true
+        : (rawActive == true || rawActive == 1 || rawActive.toString() == '1' || rawActive.toString().toLowerCase() == 'true');
 
     return CompanySearchItem(
       namaPerusahaan: json['nama_perusahaan']?.toString() ?? '-',
@@ -58,6 +84,7 @@ class CompanySearchItem {
           ? json['total_reports']
           : int.tryParse(json['total_reports'].toString()) ?? 0,
       reports: [],
+      isActive: active,
     );
   }
 

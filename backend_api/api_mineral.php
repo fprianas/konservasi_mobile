@@ -85,6 +85,14 @@ try {
             handleGetAnalysis();
             break;
 
+        case 'companies_status':
+            handleGetCompaniesStatus();
+            break;
+
+        case 'toggle_company_status':
+            handleToggleCompanyStatus();
+            break;
+
         case 'list':
         default:
             handleGetList();
@@ -163,11 +171,11 @@ function handleGetSummary() {
     $triwulan = escapeString($_GET['triwulan'] ?? '');
     $jenis_perizinan = escapeString($_GET['jenis_perizinan'] ?? '');
 
-    // 1. Total Perusahaan Terdaftar
+    // 1. Total Perusahaan Terdaftar (hanya yang aktif)
     $sql_total = "SELECT COUNT(DISTINCT pm.sk_iup) as total 
                   FROM perusahaan_mineral pm 
                   LEFT JOIN provinsi_mineral prov ON pm.id_provinsi = prov.id 
-                  WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != ''";
+                  WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != '' AND COALESCE(pm.is_active, 1) = 1";
     if (!empty($provinsi) && $provinsi !== 'semua') {
         $sql_total .= " AND prov.nama_provinsi = '$provinsi'";
     }
@@ -179,9 +187,9 @@ function handleGetSummary() {
 
     // Fallback jika perusahaan_mineral kosong
     if ($total_perusahaan === 0) {
-        $sql_fb = "SELECT COUNT(DISTINCT sk_iup) as total FROM vlaporan_mineral";
+        $sql_fb = "SELECT COUNT(DISTINCT sk_iup) as total FROM vlaporan_mineral WHERE sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')";
         if (!empty($provinsi) && $provinsi !== 'semua') {
-            $sql_fb .= " WHERE provinsi = '$provinsi'";
+            $sql_fb .= " AND provinsi = '$provinsi'";
         }
         $res_fb = executeQuery($sql_fb);
         if ($res_fb && $row_fb = $res_fb->fetch_assoc()) {
@@ -189,8 +197,12 @@ function handleGetSummary() {
         }
     }
 
-    // 2. Total Laporan & Perusahaan Sudah Lapor
-    $where_lap = ["provinsi IS NOT NULL", "nama_perusahaan IS NOT NULL"];
+    // 2. Total Laporan & Perusahaan Sudah Lapor (kecualikan perusahaan non-aktif)
+    $where_lap = [
+        "provinsi IS NOT NULL",
+        "nama_perusahaan IS NOT NULL",
+        "sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')"
+    ];
     if (!empty($provinsi) && $provinsi !== 'semua') {
         $where_lap[] = "provinsi = '$provinsi'";
     }
@@ -418,14 +430,14 @@ function handleGetRekapProvinsi() {
     $triwulan = escapeString($_GET['triwulan'] ?? '');
     $jenis_perizinan = escapeString($_GET['jenis_perizinan'] ?? '');
 
-    // 1. Ambil total perusahaan terdaftar per provinsi
+    // 1. Ambil total perusahaan terdaftar per provinsi (hanya yang aktif)
     // Catatan: relasi perusahaan_mineral ke provinsi_mineral adalah pm.id_provinsi = prov.id
     $sql_terdaftar = "SELECT 
                         TRIM(COALESCE(prov.nama_provinsi, 'Tidak Diketahui')) as nama_provinsi, 
                         COUNT(DISTINCT pm.sk_iup) as total 
                       FROM perusahaan_mineral pm 
                       LEFT JOIN provinsi_mineral prov ON pm.id_provinsi = prov.id 
-                      WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != ''
+                      WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != '' AND COALESCE(pm.is_active, 1) = 1
                       GROUP BY TRIM(COALESCE(prov.nama_provinsi, 'Tidak Diketahui'))";
     $res_terdaftar = executeQuery($sql_terdaftar);
     $map_provinsi = [];
@@ -445,8 +457,13 @@ function handleGetRekapProvinsi() {
         }
     }
 
-    // 2. Ambil data laporan per provinsi sesuai filter tahun & triwulan
-    $where_lap = ["provinsi IS NOT NULL", "provinsi != ''", "nama_perusahaan IS NOT NULL"];
+    // 2. Ambil data laporan per provinsi sesuai filter tahun & triwulan (kecualikan perusahaan non-aktif)
+    $where_lap = [
+        "provinsi IS NOT NULL",
+        "provinsi != ''",
+        "nama_perusahaan IS NOT NULL",
+        "sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')"
+    ];
     if (!empty($tahun) && $tahun !== 'semua') {
         $where_lap[] = "tahun = '$tahun'";
     }
@@ -614,7 +631,11 @@ function handleGetRecentSubmissions() {
  * Mendapatkan ringkasan internal summary untuk kalkulasi trend mineral
  */
 function getSummaryInternalMineral($tahun = '', $triwulan = '', $provinsi = '') {
-    $where_lap = ["provinsi IS NOT NULL", "nama_perusahaan IS NOT NULL"];
+    $where_lap = [
+        "provinsi IS NOT NULL",
+        "nama_perusahaan IS NOT NULL",
+        "sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')"
+    ];
     if (!empty($provinsi) && $provinsi !== 'semua') {
         $where_lap[] = "provinsi = '$provinsi'";
     }
@@ -643,7 +664,7 @@ function getSummaryInternalMineral($tahun = '', $triwulan = '', $provinsi = '') 
     $sql_total = "SELECT COUNT(DISTINCT pm.sk_iup) as total 
                   FROM perusahaan_mineral pm 
                   LEFT JOIN provinsi_mineral prov ON pm.id_provinsi = prov.id 
-                  WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != ''";
+                  WHERE pm.sk_iup IS NOT NULL AND pm.sk_iup != '' AND COALESCE(pm.is_active, 1) = 1";
     if (!empty($provinsi) && $provinsi !== 'semua') {
         $sql_total .= " AND prov.nama_provinsi = '$provinsi'";
     }
@@ -681,11 +702,15 @@ function getSummaryInternalMineral($tahun = '', $triwulan = '', $provinsi = '') 
  */
 function handleSearchCompanies() {
     $q = escapeString($_GET['q'] ?? $_GET['query'] ?? $_GET['search'] ?? '');
+    $tahun = escapeString($_GET['tahun'] ?? '');
     $limit = max(5, min(100, (int)($_GET['limit'] ?? 40)));
 
     $where = ["provinsi IS NOT NULL", "nama_perusahaan IS NOT NULL", "nama_perusahaan != ''"];
     if (!empty($q)) {
         $where[] = "(nama_perusahaan LIKE '%$q%' OR sk_iup LIKE '%$q%' OR provinsi LIKE '%$q%')";
+    }
+    if (!empty($tahun) && $tahun !== 'semua') {
+        $where[] = "tahun = '$tahun'";
     }
     $where_sql = implode(' AND ', $where);
 
@@ -693,9 +718,9 @@ function handleSearchCompanies() {
                 sk_iup,
                 nama_perusahaan,
                 provinsi,
-                jenis_perizinan,
-                komoditas_mineral,
-                sistem_penambangan,
+                MAX(jenis_perizinan) as jenis_perizinan,
+                MAX(komoditas_mineral) as komoditas_mineral,
+                MAX(sistem_penambangan) as sistem_penambangan,
                 MAX(id) as latest_id,
                 MAX(tahun) as latest_tahun,
                 MAX(waktu_pelaporan) as latest_triwulan,
@@ -703,16 +728,37 @@ function handleSearchCompanies() {
                 COUNT(*) as total_reports
             FROM vlaporan_mineral
             WHERE $where_sql
-            GROUP BY sk_iup, nama_perusahaan, provinsi, jenis_perizinan, komoditas_mineral, sistem_penambangan
+            GROUP BY sk_iup, nama_perusahaan, provinsi
             ORDER BY nama_perusahaan ASC
             LIMIT $limit";
 
     $res = executeQuery($sql);
+    // Ambil peta status is_active dari perusahaan_mineral
+    $active_map = [];
+    $res_active = executeQuery("SELECT sk_iup, nama_perusahaan, COALESCE(is_active, 1) as is_active FROM perusahaan_mineral");
+    if ($res_active) {
+        while ($ra = $res_active->fetch_assoc()) {
+            $sk_k = strtolower(trim($ra['sk_iup'] ?? ''));
+            $nm_k = strtolower(trim($ra['nama_perusahaan'] ?? ''));
+            $act = ((int)$ra['is_active']) === 1;
+            if ($sk_k !== '') $active_map['sk:' . $sk_k] = $act;
+            if ($nm_k !== '') $active_map['nm:' . $nm_k] = $act;
+        }
+    }
+
     $data = [];
     if ($res) {
         while ($row = $res->fetch_assoc()) {
             $sistem = strtolower($row['sistem_penambangan'] ?? '');
             $is_produksi = !empty($sistem) && strpos($sistem, 'belum produksi') === false;
+            $sk_k = strtolower(trim($row['sk_iup'] ?? ''));
+            $nm_k = strtolower(trim($row['nama_perusahaan'] ?? ''));
+            $is_active = true;
+            if (isset($active_map['sk:' . $sk_k])) {
+                $is_active = $active_map['sk:' . $sk_k];
+            } elseif (isset($active_map['nm:' . $nm_k])) {
+                $is_active = $active_map['nm:' . $nm_k];
+            }
 
             $data[] = [
                 'nama_perusahaan' => $row['nama_perusahaan'],
@@ -721,6 +767,7 @@ function handleSearchCompanies() {
                 'jenis_perizinan' => $row['jenis_perizinan'] ?? '-',
                 'komoditas' => $row['komoditas_mineral'] ?? 'Mineral',
                 'sektor' => 'mineral',
+                'is_active' => $is_active,
                 'latest_status_produksi' => $is_produksi ? 'Sudah Produksi' : 'Belum Produksi',
                 'latest_status_produksi_code' => $is_produksi ? 'P' : 'BP',
                 'latest_tahun' => $row['latest_tahun'] ?? '-',
@@ -823,6 +870,7 @@ function handleGetAnalysis() {
                     COUNT(*) as total_laporan
                  FROM vlaporan_mineral
                  WHERE tahun = '$tahun_curr' AND waktu_pelaporan = '".formatTriwulan($triwulan_curr)."'
+                   AND sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')
                  GROUP BY provinsi";
     $res_p_curr = executeQuery($sql_prov);
     $prov_curr = [];
@@ -842,6 +890,7 @@ function handleGetAnalysis() {
                          COUNT(DISTINCT sk_iup) as sudah_lapor
                       FROM vlaporan_mineral
                       WHERE tahun = '$tahun_prev' AND waktu_pelaporan = '".formatTriwulan($triwulan_prev)."'
+                        AND sk_iup NOT IN (SELECT sk_iup FROM perusahaan_mineral WHERE is_active = 0 AND sk_iup IS NOT NULL AND sk_iup != '')
                       GROUP BY provinsi";
     $res_p_prev = executeQuery($sql_prov_prev);
     $prev_sudah_map = [];
@@ -937,6 +986,138 @@ function handleGetAnalysis() {
         ]
     ]);
 }
+
+/**
+ * Mengambil daftar perusahaan mineral beserta status aktif/non-aktif
+ */
+function handleGetCompaniesStatus() {
+    $q = escapeString($_GET['q'] ?? '');
+    $status = escapeString($_GET['status'] ?? 'semua'); // semua | aktif | nonaktif
+    $provinsi = escapeString($_GET['provinsi'] ?? 'semua');
+    $limit = max(10, min(1000, (int)($_GET['limit'] ?? 500)));
+
+    $where = ["pm.sk_iup IS NOT NULL", "pm.sk_iup != ''"];
+    if (!empty($q)) {
+        $where[] = "(pm.nama_perusahaan LIKE '%$q%' OR pm.sk_iup LIKE '%$q%' OR COALESCE(prov.nama_provinsi, '') LIKE '%$q%')";
+    }
+    if (!empty($provinsi) && $provinsi !== 'semua') {
+        $where[] = "prov.nama_provinsi = '$provinsi'";
+    }
+    if ($status === 'aktif') {
+        $where[] = "COALESCE(pm.is_active, 1) = 1";
+    } elseif ($status === 'nonaktif') {
+        $where[] = "COALESCE(pm.is_active, 1) = 0";
+    }
+
+    $where_sql = implode(' AND ', $where);
+    $sql = "SELECT
+                pm.id,
+                pm.nama_perusahaan,
+                pm.sk_iup,
+                COALESCE(prov.nama_provinsi, '-') as provinsi,
+                COALESCE(pm.jenis_izin, '-') as jenis_izin,
+                COALESCE(pm.komoditas, 'Mineral') as komoditas,
+                COALESCE(pm.is_active, 1) as is_active
+            FROM perusahaan_mineral pm
+            LEFT JOIN provinsi_mineral prov ON pm.id_provinsi = prov.id
+            WHERE $where_sql
+            ORDER BY pm.nama_perusahaan ASC
+            LIMIT $limit";
+
+    $res = executeQuery($sql);
+    $data = [];
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $data[] = [
+                'id' => (int)$row['id'],
+                'nama_perusahaan' => $row['nama_perusahaan'],
+                'sk_iup' => $row['sk_iup'],
+                'provinsi' => $row['provinsi'],
+                'jenis_izin' => $row['jenis_izin'],
+                'komoditas' => $row['komoditas'],
+                'is_active' => ((int)$row['is_active']) === 1,
+                'sektor' => 'mineral',
+            ];
+        }
+    }
+
+    // Ringkasan total keseluruhan perusahaan mineral
+    $sum_sql = "SELECT
+                    COUNT(DISTINCT sk_iup) as total,
+                    COUNT(DISTINCT CASE WHEN COALESCE(is_active, 1) = 1 THEN sk_iup END) as aktif,
+                    COUNT(DISTINCT CASE WHEN COALESCE(is_active, 1) = 0 THEN sk_iup END) as nonaktif
+                FROM perusahaan_mineral
+                WHERE sk_iup IS NOT NULL AND sk_iup != ''";
+    $res_sum = executeQuery($sum_sql);
+    $summary = ['total' => 0, 'aktif' => 0, 'nonaktif' => 0];
+    if ($res_sum && $rs = $res_sum->fetch_assoc()) {
+        $summary = [
+            'total' => (int)$rs['total'],
+            'aktif' => (int)$rs['aktif'],
+            'nonaktif' => (int)$rs['nonaktif'],
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'summary' => $summary,
+        'total' => count($data),
+        'data' => $data,
+    ]);
+}
+
+/**
+ * Mengubah status aktif/non-aktif perusahaan mineral (dilindungi PIN)
+ */
+function handleToggleCompanyStatus() {
+    $raw = file_get_contents('php://input');
+    $body = json_decode($raw, true);
+    if (!is_array($body)) $body = [];
+
+    $pin = trim((string)($body['pin'] ?? $_POST['pin'] ?? ''));
+    if ($pin !== '3636') {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Kode keamanan (PIN) tidak valid']);
+        return;
+    }
+
+    $id = (int)($body['id'] ?? $_POST['id'] ?? 0);
+    $sk_iup = escapeString($body['sk_iup'] ?? $_POST['sk_iup'] ?? '');
+    $nama = escapeString($body['nama_perusahaan'] ?? $_POST['nama_perusahaan'] ?? '');
+    $is_active_raw = $body['is_active'] ?? $_POST['is_active'] ?? null;
+
+    if ($is_active_raw === null) {
+        echo json_encode(['success' => false, 'message' => 'Parameter is_active diperlukan']);
+        return;
+    }
+    $is_active = ($is_active_raw === true || $is_active_raw === 1 || $is_active_raw === '1' || $is_active_raw === 'true') ? 1 : 0;
+
+    if ($id > 0) {
+        $sql = "UPDATE perusahaan_mineral SET is_active = $is_active WHERE id = $id";
+    } elseif (!empty($sk_iup) && $sk_iup !== '-') {
+        $sql = "UPDATE perusahaan_mineral SET is_active = $is_active WHERE sk_iup = '$sk_iup'";
+    } elseif (!empty($nama)) {
+        $sql = "UPDATE perusahaan_mineral SET is_active = $is_active WHERE nama_perusahaan = '$nama'";
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Identifier perusahaan (id / sk_iup / nama_perusahaan) diperlukan']);
+        return;
+    }
+
+    $ok = executeQuery($sql);
+    if ($ok) {
+        echo json_encode([
+            'success' => true,
+            'is_active' => $is_active === 1,
+            'message' => $is_active === 1 ? 'Perusahaan berhasil diaktifkan kembali' : 'Perusahaan berhasil dinonaktifkan'
+        ]);
+    } else {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Gagal memperbarui status perusahaan'
+        ]);
+    }
+}
+
 
 
 
