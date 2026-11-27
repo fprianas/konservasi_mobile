@@ -15,7 +15,7 @@ on:
 
 jobs:
   build-macos:
-    name: Build macOS App
+    name: Build macOS App & DMG Installer
     runs-on: macos-latest # Mesin Mac resmi milik GitHub (Apple Silicon M1/M2)
 
     steps:
@@ -38,23 +38,45 @@ jobs:
       - name: Build macOS Release
         run: flutter build macos --release
 
-      - name: Compress macOS Application (.app to .zip)
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create Visual DMG Installer (.dmg)
+        run: |
+          mkdir -p dmg_staging
+          cp -R "build/macos/Build/Products/Release/minerba_mobile.app" "dmg_staging/Konservasi Minerba.app"
+          create-dmg \
+            --volname "Konservasi Minerba Installer" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "Konservasi Minerba.app" 175 180 \
+            --hide-extension "Konservasi Minerba.app" \
+            --app-drop-link 425 180 \
+            --no-internet-enable \
+            "build/macos/Build/Products/Release/Konservasi_Minerba.dmg" \
+            "dmg_staging/"
+
+      - name: Compress macOS Application (.app to .zip backup)
         run: |
           cd build/macos/Build/Products/Release
-          # Opsi -y wajib digunakan agar symlink framework macOS tidak rusak
           zip -r -y "minerba_mobile_macos.zip" "minerba_mobile.app"
 
-      - name: Upload macOS Build Artifact
+      - name: Upload macOS DMG & ZIP Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: minerba-mobile-macos
-          path: build/macos/Build/Products/Release/minerba_mobile_macos.zip
+          path: |
+            build/macos/Build/Products/Release/Konservasi_Minerba.dmg
+            build/macos/Build/Products/Release/minerba_mobile_macos.zip
           retention-days: 14
 
       - name: Attach to GitHub Release (Jika event release)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: build/macos/Build/Products/Release/minerba_mobile_macos.zip
+          files: |
+            build/macos/Build/Products/Release/Konservasi_Minerba.dmg
+            build/macos/Build/Products/Release/minerba_mobile_macos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
