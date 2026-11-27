@@ -1223,6 +1223,16 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
 
     if (!mounted) return;
     final latestRep = _reports.isNotEmpty ? _reports.first : null;
+    final targetRep = rep ?? latestRep;
+    final lapFile = targetRep?.laporanFile?.trim();
+    final petaFile = targetRep?.petaFile?.trim();
+    final laporanUrl = (lapFile != null && lapFile.isNotEmpty && lapFile != '-')
+        ? ApiService.getFileUrl(widget.company.type, lapFile, fileKind: 'laporan')
+        : null;
+    final petaUrl = (petaFile != null && petaFile.isNotEmpty && petaFile != '-')
+        ? ApiService.getFileUrl(widget.company.type, petaFile, fileKind: 'peta')
+        : null;
+
     final result = await EvaluasiPerusahaanDialog.show(
       context,
       namaPerusahaan: widget.company.namaPerusahaan,
@@ -1234,6 +1244,8 @@ class _CompanyHistoryModalState extends State<_CompanyHistoryModal> {
       tahun: year,
       statusProduksi: rep?.statusProduksi ?? widget.company.latestStatusProduksi,
       initialData: existing,
+      laporanUrl: laporanUrl,
+      petaUrl: petaUrl,
     );
 
     if (result != null && mounted) {

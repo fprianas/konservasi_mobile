@@ -1,4 +1,8 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:pdfrx/pdfrx.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/evaluasi_perusahaan_model.dart';
 import '../services/evaluasi_perusahaan_service.dart';
 import 'delete_evaluasi_dialog.dart';
@@ -25,6 +29,8 @@ class EvaluasiPerusahaanDialog extends StatefulWidget {
   final int tahun;
   final String statusProduksi;
   final EvaluasiPerusahaanItem? initialData;
+  final String? laporanUrl;
+  final String? petaUrl;
 
   const EvaluasiPerusahaanDialog({
     super.key,
@@ -37,6 +43,8 @@ class EvaluasiPerusahaanDialog extends StatefulWidget {
     this.tahun = 0,
     this.statusProduksi = '',
     this.initialData,
+    this.laporanUrl,
+    this.petaUrl,
   });
 
   /// Helper untuk membuka dialog modal evaluasi
@@ -51,6 +59,8 @@ class EvaluasiPerusahaanDialog extends StatefulWidget {
     int tahun = 0,
     String statusProduksi = '',
     EvaluasiPerusahaanItem? initialData,
+    String? laporanUrl,
+    String? petaUrl,
   }) {
     return showDialog<EvaluasiPerusahaanItem?>(
       context: context,
@@ -65,6 +75,8 @@ class EvaluasiPerusahaanDialog extends StatefulWidget {
         tahun: tahun,
         statusProduksi: statusProduksi,
         initialData: initialData,
+        laporanUrl: laporanUrl,
+        petaUrl: petaUrl,
       ),
     );
   }
@@ -88,6 +100,18 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
   bool _isLoadingInitial = false;
   bool _isSaving = false;
   String? _errorMessage;
+
+  // Built-in Side-by-Side PDF / Peta Viewer state
+  bool _showSideViewer = true;
+  int _activeDocTab = 0; // 0: Laporan PDF, 1: Peta
+  int _mobileTabIndex = 0; // 0: Form Evaluasi, 1: Dokumen
+  final Map<String, Uint8List> _docBytesCache = {};
+  final Map<String, String> _docErrors = {};
+  final Set<String> _docLoading = {};
+
+  bool get _hasLaporan => widget.laporanUrl != null && widget.laporanUrl!.trim().isNotEmpty;
+  bool get _hasPeta => widget.petaUrl != null && widget.petaUrl!.trim().isNotEmpty;
+  bool get _hasAnyDoc => _hasLaporan || _hasPeta;
 
   List<ObjekEvaluasiConfig> _getObjekList() {
     final isBatubaraOrAspal = widget.tipe.toLowerCase() == 'batubara' ||
@@ -150,6 +174,56 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
 
     _applyItemData(_existingItem);
     _loadData();
+
+    if (!_hasLaporan && _hasPeta) {
+      _activeDocTab = 1;
+    }
+    final initialUrl = _activeDocTab == 0 ? widget.laporanUrl : widget.petaUrl;
+    if (initialUrl != null && initialUrl.trim().isNotEmpty) {
+      _fetchDocumentBytes(initialUrl.trim());
+    }
+  }
+
+  Future<void> _fetchDocumentBytes(String url, {bool force = false}) async {
+    if (url.isEmpty) return;
+    if (!force && (_docBytesCache.containsKey(url) || _docLoading.contains(url))) return;
+
+    setState(() {
+      _docLoading.add(url);
+      _docErrors.remove(url);
+    });
+
+    try {
+      final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 45));
+      if (!mounted) return;
+      if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
+        setState(() {
+          _docBytesCache[url] = resp.bodyBytes;
+          _docLoading.remove(url);
+        });
+      } else {
+        setState(() {
+          _docErrors[url] = 'Dokumen tidak dapat dimuat (HTTP ${resp.statusCode})';
+          _docLoading.remove(url);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _docErrors[url] = 'Gagal mengunduh dokumen: $e';
+        _docLoading.remove(url);
+      });
+    }
+  }
+
+  Future<void> _openExternalUrl(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) {
+        await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+      }
+    } catch (_) {}
   }
 
   void _applyItemData(EvaluasiPerusahaanItem? item) {
@@ -331,21 +405,30 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
     final isBatubara = widget.tipe.toLowerCase() == 'batubara';
     final accentColor = isBatubara ? const Color(0xFFF59E0B) : const Color(0xFF0284C7);
     final objekList = _getObjekList();
+    final screenSize = MediaQuery.of(context).size;
+    final isWideScreen = screenSize.width >= 840;
+    final isWideSplit = _hasAnyDoc && _showSideViewer && isWideScreen;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: Colors.white,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: isWideSplit ? 20 : 16,
+        vertical: 20,
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 620, maxHeight: 850),
+        constraints: BoxConstraints(
+          maxWidth: isWideSplit ? 1320 : 620,
+          maxHeight: isWideSplit ? (screenSize.height * 0.92).clamp(600.0, 920.0) : 850,
+        ),
         child: Column(
           children: [
             // Header modal
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F172A),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F172A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Row(
                 children: [
@@ -384,6 +467,34 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
                       ],
                     ),
                   ),
+                  if (_hasAnyDoc && isWideScreen) ...[
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() => _showSideViewer = !_showSideViewer);
+                        if (_showSideViewer) {
+                          final url = _activeDocTab == 0 ? widget.laporanUrl : widget.petaUrl;
+                          if (url != null && url.trim().isNotEmpty) {
+                            _fetchDocumentBytes(url.trim());
+                          }
+                        }
+                      },
+                      icon: Icon(
+                        _showSideViewer ? Icons.vertical_split : Icons.picture_as_pdf_outlined,
+                        size: 16,
+                        color: const Color(0xFFFBBF24),
+                      ),
+                      label: Text(
+                        _showSideViewer ? 'Tutup PDF' : 'Buka PDF Side-by-Side',
+                        style: const TextStyle(fontSize: 11.5, color: Color(0xFFFBBF24), fontWeight: FontWeight.bold),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFF59E0B), width: 1),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70, size: 20),
                     onPressed: () => Navigator.of(context).pop(),
@@ -392,11 +503,375 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
               ),
             ),
 
-            // Form Body (Scrollable)
+            // Switcher Tab untuk layar sempit (HP / setengah layar)
+            if (_hasAnyDoc && !isWideScreen)
+              Container(
+                color: const Color(0xFFF1F5F9),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildMobileSwitchTab(
+                        label: 'Form Evaluasi',
+                        icon: Icons.fact_check_outlined,
+                        selected: _mobileTabIndex == 0,
+                        onTap: () => setState(() => _mobileTabIndex = 0),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildMobileSwitchTab(
+                        label: 'Lihat Laporan PDF',
+                        icon: Icons.picture_as_pdf_outlined,
+                        selected: _mobileTabIndex == 1,
+                        onTap: () {
+                          setState(() => _mobileTabIndex = 1);
+                          final url = _activeDocTab == 0 ? widget.laporanUrl : widget.petaUrl;
+                          if (url != null && url.trim().isNotEmpty) {
+                            _fetchDocumentBytes(url.trim());
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // Body: Side-by-Side Split View (Desktop/Tablet) atau Tab Switch (Mobile)
             Expanded(
-              child: _isLoadingInitial
-                  ? const Center(child: CircularProgressIndicator())
-                  : Form(
+              child: isWideSplit
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          flex: 6,
+                          child: _buildDocViewerPanel(),
+                        ),
+                        Container(width: 1, color: const Color(0xFFE2E8F0)),
+                        Expanded(
+                          flex: 5,
+                          child: _buildFormBody(isBatubara, accentColor, objekList),
+                        ),
+                      ],
+                    )
+                  : (_hasAnyDoc && !isWideScreen && _mobileTabIndex == 1)
+                      ? _buildDocViewerPanel()
+                      : _buildFormBody(isBatubara, accentColor, objekList),
+            ),
+
+            // Footer
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  if (isEdit)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+                      tooltip: 'Hapus Evaluasi Perusahaan',
+                      onPressed: _isSaving ? null : _confirmDelete,
+                    ),
+                  const Spacer(),
+                  OutlinedButton(
+                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('Batal', style: TextStyle(color: Color(0xFF64748B))),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: _isSaving ? null : _saveEvaluasi,
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check, size: 18),
+                    label: Text(
+                      _isSaving
+                          ? 'Menyimpan...'
+                          : (isEdit ? 'Simpan Perubahan' : 'Simpan Evaluasi'),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isAllMemadai ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileSwitchTab({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF0F172A) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 15, color: selected ? const Color(0xFFFBBF24) : const Color(0xFF64748B)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: selected ? Colors.white : const Color(0xFF475569),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocViewerPanel() {
+    final activeUrl = (_activeDocTab == 0 ? widget.laporanUrl : widget.petaUrl)?.trim() ?? '';
+    final bytes = _docBytesCache[activeUrl];
+    final errMsg = _docErrors[activeUrl];
+    final isLoading = _docLoading.contains(activeUrl);
+
+    return Container(
+      color: const Color(0xFF1E293B),
+      child: Column(
+        children: [
+          // Doc Toolbar
+          Container(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.7),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                if (_hasLaporan)
+                  _buildDocTabChip(
+                    label: 'Laporan PDF',
+                    icon: Icons.picture_as_pdf_outlined,
+                    selected: _activeDocTab == 0,
+                    onTap: () {
+                      setState(() => _activeDocTab = 0);
+                      _fetchDocumentBytes(widget.laporanUrl!.trim());
+                    },
+                  ),
+                if (_hasLaporan && _hasPeta) const SizedBox(width: 6),
+                if (_hasPeta)
+                  _buildDocTabChip(
+                    label: 'Lampiran Peta',
+                    icon: Icons.map_outlined,
+                    selected: _activeDocTab == 1,
+                    onTap: () {
+                      setState(() => _activeDocTab = 1);
+                      _fetchDocumentBytes(widget.petaUrl!.trim());
+                    },
+                  ),
+                const Spacer(),
+                if (activeUrl.isNotEmpty) ...[
+                  IconButton(
+                    tooltip: 'Muat Ulang Dokumen',
+                    icon: const Icon(Icons.refresh, size: 18, color: Colors.white70),
+                    onPressed: isLoading ? null : () => _fetchDocumentBytes(activeUrl, force: true),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _openExternalUrl(activeUrl),
+                    icon: const Icon(Icons.open_in_new, size: 14, color: Color(0xFF38BDF8)),
+                    label: const Text(
+                      'Buka di Luar',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF38BDF8), fontWeight: FontWeight.bold),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // Viewer Area
+          Expanded(
+            child: activeUrl.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Tidak ada berkas laporan tersedia.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                    ),
+                  )
+                : isLoading
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(color: Color(0xFFFBBF24)),
+                            SizedBox(height: 12),
+                            Text(
+                              'Mengunduh dokumen laporan...',
+                              style: TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      )
+                    : errMsg != null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.error_outline, size: 40, color: Color(0xFFF87171)),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    errMsg,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: () => _fetchDocumentBytes(activeUrl, force: true),
+                                        icon: const Icon(Icons.refresh, size: 16),
+                                        label: const Text('Coba Lagi'),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: () => _openExternalUrl(activeUrl),
+                                        icon: const Icon(Icons.open_in_new, size: 16, color: Colors.white),
+                                        label: const Text('Buka di Browser', style: TextStyle(color: Colors.white)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : bytes != null
+                            ? _buildRenderedDocument(activeUrl, bytes)
+                            : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocTabChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFF59E0B) : Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: selected ? const Color(0xFF18181B) : Colors.white70),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: selected ? const Color(0xFF18181B) : Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRenderedDocument(String url, Uint8List bytes) {
+    final isPdfMagic = bytes.length >= 4 &&
+        bytes[0] == 0x25 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x44 &&
+        bytes[3] == 0x46; // %PDF
+    if (isPdfMagic) {
+      return PdfViewer.data(
+        bytes,
+        sourceName: url,
+        params: const PdfViewerParams(
+          backgroundColor: Color(0xFF334155),
+        ),
+      );
+    }
+
+    final lowerUrl = url.toLowerCase();
+    final isImageMagic = (bytes.length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50) || // PNG
+        (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) || // JPEG
+        lowerUrl.endsWith('.png') ||
+        lowerUrl.endsWith('.jpg') ||
+        lowerUrl.endsWith('.jpeg') ||
+        lowerUrl.endsWith('.webp');
+    if (isImageMagic) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 5.0,
+        child: Center(
+          child: Image.memory(bytes, fit: BoxFit.contain),
+        ),
+      );
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.insert_drive_file_outlined, size: 42, color: Colors.white60),
+            const SizedBox(height: 10),
+            const Text(
+              'Format berkas ini tidak dapat dipratinjau langsung.',
+              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () => _openExternalUrl(url),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('Buka di Aplikasi Luar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFormBody(bool isBatubara, Color accentColor, List<ObjekEvaluasiConfig> objekList) {
+    if (_isLoadingInitial) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Form(
                       key: _formKey,
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.all(20),
@@ -648,62 +1123,6 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
                           ],
                         ),
                       ),
-                    ),
-            ),
-
-            // Footer
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: Colors.grey.shade200)),
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
-              ),
-              child: Row(
-                children: [
-                  if (isEdit)
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
-                      tooltip: 'Hapus Evaluasi Perusahaan',
-                      onPressed: _isSaving ? null : _confirmDelete,
-                    ),
-                  const Spacer(),
-                  OutlinedButton(
-                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('Batal', style: TextStyle(color: Color(0xFF64748B))),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _saveEvaluasi,
-                    icon: _isSaving
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.check, size: 18),
-                    label: Text(
-                      _isSaving
-                          ? 'Menyimpan...'
-                          : (isEdit ? 'Simpan Perubahan' : 'Simpan Evaluasi'),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAllMemadai ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 

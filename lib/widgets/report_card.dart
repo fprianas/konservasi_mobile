@@ -84,6 +84,15 @@ class _ReportCardState extends State<ReportCard> {
     }
 
     if (!context.mounted) return;
+    final lapFile = widget.item.laporanFile?.trim();
+    final petaFile = widget.item.petaFile?.trim();
+    final laporanUrl = (lapFile != null && lapFile.isNotEmpty && lapFile != '-')
+        ? ApiService.getFileUrl(widget.type, lapFile, fileKind: 'laporan')
+        : null;
+    final petaUrl = (petaFile != null && petaFile.isNotEmpty && petaFile != '-')
+        ? ApiService.getFileUrl(widget.type, petaFile, fileKind: 'peta')
+        : null;
+
     final result = await EvaluasiPerusahaanDialog.show(
       context,
       namaPerusahaan: widget.item.namaPerusahaan,
@@ -95,6 +104,8 @@ class _ReportCardState extends State<ReportCard> {
       tahun: int.tryParse(widget.item.tahun) ?? 0,
       statusProduksi: isProd ? 'Produksi' : 'Belum Produksi',
       initialData: _evaluasi,
+      laporanUrl: laporanUrl,
+      petaUrl: petaUrl,
     );
 
     if (result != null && mounted) {
