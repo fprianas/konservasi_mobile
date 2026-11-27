@@ -1,0 +1,28 @@
+==================================================
+  CARA PASANG & IZINKAN APLIKASI DI macOS
+  (Khusus Pengguna Pertama Kali)
+==================================================
+
+1. Seret (drag) ikon "Konservasi Minerba.app" ke folder "Applications".
+
+2. Untuk mengizinkan macOS membuka aplikasi tanpa peringatan keamanan:
+
+   CARA A (Otomatis via Script):
+   - Klik KANAN pada file "Izinkan_Aplikasi_Mac.command"
+   - Pilih "Open" -> klik "Open"
+   - Terminal akan terbuka otomatis, menyalin aplikasi, dan membukanya.
+
+   CARA B (Jika tidak bisa klik Open pada .command):
+   1) Buka aplikasi "Terminal" di Mac (Cmd + Space -> ketik Terminal)
+   2) Salin dan tempel perintah berikut lalu tekan Enter:
+
+      xattr -cr "/Applications/Konservasi Minerba.app"
+
+   3) Setelah itu buka "Konservasi Minerba" dari Launchpad / Applications.
+
+   CARA C (Tanpa Terminal via Pengaturan Mac):
+   - Coba buka aplikasi sekali -> jika diblokir, buka:
+     System Settings -> Privacy & Security -> gulir ke bawah -> klik "Open Anyway".
+
+Catatan: Langkah ini HANYA perlu dilakukan 1 kali saat pertama pasang.
+==================================================
