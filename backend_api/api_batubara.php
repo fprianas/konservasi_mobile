@@ -757,8 +757,8 @@ function handleGetCompanyHistory() {
                     'rec_penambangan' => $row['recovery_penambangan_survey_2_3'] ?? '-',
                     'rec_pengolahan' => $row['recovery_pengolahan_2_6'] ?? '-',
                 ],
-                'laporan_file' => !empty($row['laporan']) && $row['laporan'] !== '-' ? $row['laporan'] : null,
-                'peta_file' => !empty($row['peta']) && $row['peta'] !== '-' ? $row['peta'] : null,
+                'laporan_file' => !empty($row['laporan_7_1']) && $row['laporan_7_1'] !== '-' ? $row['laporan_7_1'] : (!empty($row['laporan']) && $row['laporan'] !== '-' ? $row['laporan'] : null),
+                'peta_file' => !empty($row['peta_konservasi_7_2']) && $row['peta_konservasi_7_2'] !== '-' ? $row['peta_konservasi_7_2'] : (!empty($row['peta_konservasi']) && $row['peta_konservasi'] !== '-' ? $row['peta_konservasi'] : (!empty($row['peta']) && $row['peta'] !== '-' ? $row['peta'] : null)),
                 'raw_details' => $row
             ];
         }

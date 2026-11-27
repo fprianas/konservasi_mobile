@@ -1,4 +1,4 @@
-﻿class ReportItem {
+class ReportItem {
   final int id;
   final String namaPerusahaan;
   final String skIup;
@@ -36,6 +36,18 @@
   });
 
   factory ReportItem.fromJson(Map<String, dynamic> json) {
+    final rawDetails = json['raw_details'] is Map ? Map<String, dynamic>.from(json['raw_details']) : <String, dynamic>{};
+
+    String? pickFile(dynamic direct, List<String> fallbackKeys) {
+      final d = direct?.toString().trim();
+      if (d != null && d.isNotEmpty && d != '-' && d.toLowerCase() != 'null') return d;
+      for (final k in fallbackKeys) {
+        final v = rawDetails[k]?.toString().trim();
+        if (v != null && v.isNotEmpty && v != '-' && v.toLowerCase() != 'null') return v;
+      }
+      return null;
+    }
+
     return ReportItem(
       id: json['id'] is int ? json['id'] : int.tryParse(json['id'].toString()) ?? 0,
       namaPerusahaan: json['nama_perusahaan']?.toString() ?? '-',
@@ -50,9 +62,9 @@
       waktuInput: json['waktu_input']?.toString() ?? '-',
       komoditas: json['komoditas_mineral']?.toString(),
       metrics: json['metrics'] is Map ? Map<String, dynamic>.from(json['metrics']) : {},
-      laporanFile: json['laporan_file']?.toString(),
-      petaFile: json['peta_file']?.toString(),
-      rawDetails: json['raw_details'] is Map ? Map<String, dynamic>.from(json['raw_details']) : {},
+      laporanFile: pickFile(json['laporan_file'], ['laporan_7_1', 'laporan']),
+      petaFile: pickFile(json['peta_file'], ['peta_konservasi_7_2', 'peta_konservasi', 'peta']),
+      rawDetails: rawDetails,
     );
   }
 }

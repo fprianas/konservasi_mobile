@@ -836,7 +836,7 @@ function handleGetCompanyHistory() {
                     'rec_pengolahan' => $row['recovery_pemulihan_2_6'] ?? '-',
                 ],
                 'laporan_file' => !empty($row['laporan']) && $row['laporan'] !== '-' ? $row['laporan'] : null,
-                'peta_file' => !empty($row['peta']) && $row['peta'] !== '-' ? $row['peta'] : null,
+                'peta_file' => !empty($row['peta_konservasi']) && $row['peta_konservasi'] !== '-' ? $row['peta_konservasi'] : (!empty($row['peta']) && $row['peta'] !== '-' ? $row['peta'] : null),
                 'raw_details' => $row
             ];
         }

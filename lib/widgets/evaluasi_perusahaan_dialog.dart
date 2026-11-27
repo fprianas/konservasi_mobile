@@ -406,7 +406,7 @@ class _EvaluasiPerusahaanDialogState extends State<EvaluasiPerusahaanDialog> {
     final accentColor = isBatubara ? const Color(0xFFF59E0B) : const Color(0xFF0284C7);
     final objekList = _getObjekList();
     final screenSize = MediaQuery.of(context).size;
-    final isWideScreen = screenSize.width >= 840;
+    final isWideScreen = screenSize.width >= 700;
     final isWideSplit = _hasAnyDoc && _showSideViewer && isWideScreen;
 
     return Dialog(
