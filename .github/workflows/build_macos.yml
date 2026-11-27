@@ -45,14 +45,21 @@ jobs:
         run: |
           mkdir -p dmg_staging
           cp -R "build/macos/Build/Products/Release/minerba_mobile.app" "dmg_staging/Konservasi Minerba.app"
+          if [ -d "macos/installer" ]; then
+            cp "macos/installer/BACA_CARA_INSTALL_MAC.txt" "dmg_staging/"
+            cp "macos/installer/Izinkan_Aplikasi_Mac.command" "dmg_staging/"
+            chmod +x "dmg_staging/Izinkan_Aplikasi_Mac.command"
+          fi
           create-dmg \
             --volname "Konservasi Minerba Installer" \
             --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "Konservasi Minerba.app" 175 180 \
+            --window-size 640 420 \
+            --icon-size 96 \
+            --icon "Konservasi Minerba.app" 170 160 \
             --hide-extension "Konservasi Minerba.app" \
-            --app-drop-link 425 180 \
+            --app-drop-link 470 160 \
+            --icon "Izinkan_Aplikasi_Mac.command" 210 310 \
+            --icon "BACA_CARA_INSTALL_MAC.txt" 430 310 \
             --no-internet-enable \
             "build/macos/Build/Products/Release/Konservasi_Minerba.dmg" \
             "dmg_staging/"
